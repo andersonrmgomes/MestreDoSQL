@@ -374,9 +374,24 @@ function venn(t,lab){
 /* ===== 5. Estado, menu e telas ===== */
 const app=document.getElementById('app');
 let S;
-// recordes guardados no navegador (se disponível)
-const getBest=()=>{try{return JSON.parse(localStorage.getItem('sqlbest')||'{}')}catch(e){return{}}};
-const setBest=(id,v)=>{try{const b=getBest();if(v>(b[id]||0)){b[id]=v;localStorage.setItem('sqlbest',JSON.stringify(b))}}catch(e){}};
+let storageWarning='';
+const reportStorageError=e=>{
+  storageWarning='Não foi possível salvar ou carregar os recordes neste navegador.';
+  console.error(storageWarning,e);
+};
+const getBest=()=>{
+  try{
+    const best=JSON.parse(localStorage.getItem('sqlbest')||'{}');
+    if(!best||typeof best!=='object'||Array.isArray(best))throw new Error('Formato de recordes inválido.');
+    return best;
+  }catch(e){reportStorageError(e);return{}}
+};
+const setBest=(id,v)=>{
+  try{
+    const b=getBest();
+    if(v>(b[id]||0)){b[id]=v;localStorage.setItem('sqlbest',JSON.stringify(b))}
+  }catch(e){reportStorageError(e)}
+};
 /* Barras: visualiza o valor (última coluna) de cada grupo */
 function bars(r){if(!r.rows||!r.rows.length)return'';
   const mx=Math.max(...r.rows.map(x=>x[x.length-1]||0),1);
@@ -385,6 +400,7 @@ function bars(r){if(!r.rows||!r.rows.length)return'';
 function menu(){
   const b=getBest();
   app.innerHTML=`<div class="card center"><h1>🧠 Mestre do SQL</h1><p>Escolha um módulo e aprenda MySQL jogando.</p></div>
+  ${storageWarning?`<div class="card err">${esc(storageWarning)}</div>`:''}
   <div class="menu">${MODS.map((m,i)=>`<button class="mod" onclick="play(${i})"><span class="ico">${m.ico}</span><b>${m.nome}</b><small>${m.desc}</small>
   <small>${m.phases.length} fases${b[m.id]!=null?` · 🏅 recorde: ${b[m.id]}/${m.phases.length*100}`:''}</small></button>`).join('')}</div>
   <div class="card center"><small>Pontos: 100 de primeira, 60 na 2ª tentativa, 30 na 3ª · 3 vidas ❤️ por módulo.</small></div>`;
@@ -405,17 +421,17 @@ function pick(i){
   const p=S.M.phases[S.i],op=p.opts[i],last=S.i+1>=S.M.phases.length;S.tries++;
   const btn=document.getElementById('o'+i),fb=document.getElementById('fb');
   if(op.ok){
-    const gain=[100,60,30][Math.min(S.tries,3)-1];S.pts+=gain;S.locked=true;S.log.push({t:p.t,tries:S.tries,gain});
+    const gain=[100,60,30][Math.min(S.tries,3)-1];S.pts+=gain;setBest(S.M.id,S.pts);S.locked=true;S.log.push({t:p.t,tries:S.tries,gain});
     btn.classList.add('good');
     const vis=p.v?venn(p.v,p.lab):S.M.bars?bars(run(op.q)):'';
-    fb.innerHTML=`<div class="card fb ok"><h2 class="ok">✅ Correto! +${gain} pts</h2><p>${op.why}</p><p>${p.exp}</p>
+    fb.innerHTML=`<div class="card fb ok"><h2 class="ok">✅ Correto! +${gain} pts</h2><p>${op.why}</p><p>${p.exp}</p>${storageWarning?`<p class="err">${esc(storageWarning)}</p>`:''}
     <div class="${vis?'split':''}"><div>${resultHTML(op.q)}</div>${vis?'<div>'+vis+'</div>':''}</div>
     <button class="big" onclick="next()">${last?'Ver resultado final 🏆':'Próxima fase ➜'}</button></div>`;
   }else{
     S.lives--;S.bad.push(i);btn.classList.add('bad');btn.disabled=true;
     document.getElementById('lv').textContent=S.lives?'❤️'.repeat(S.lives):'💔';
     const over=S.lives<=0;if(over){S.locked=true;S.log.push({t:p.t,tries:S.tries,gain:0});}
-    fb.innerHTML=`<div class="card fb no"><h2 class="no">❌ Não foi dessa vez${over?' — acabaram as vidas!':''}</h2><p>${op.why}</p>${resultHTML(op.q)}
+    fb.innerHTML=`<div class="card fb no"><h2 class="no">❌ Não foi dessa vez${over?' — acabaram as vidas!':''}</h2><p>${op.why}</p>${storageWarning?`<p class="err">${esc(storageWarning)}</p>`:''}${resultHTML(op.q)}
     ${over?'<button class="big" onclick="end()">Ver resultado</button>':'<p>Tente outra opção (você perdeu 1 vida).</p>'}</div>`;
   }
   fb.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -426,7 +442,7 @@ function end(){
   setBest(S.M.id,S.pts);
   const nivel=!won?'Continue treinando! 💪':pct>=85?'Mestre! 🏆':pct>=55?'Quase lá, ótimo desempenho! 🌟':'Você concluiu! Revise os conceitos. 📚';
   app.innerHTML=`<div class="card center"><h1>${won?'🎉 Fim do módulo!':'💔 Fim de jogo'}</h1><h2>${S.M.nome}: ${nivel}</h2>
-  <p><b>${S.pts}</b> de ${max} pontos (${pct}%) · vidas restantes: ${S.lives}</p>
+  <p><b>${S.pts}</b> de ${max} pontos (${pct}%) · vidas restantes: ${S.lives}</p>${storageWarning?`<p class="err">${esc(storageWarning)}</p>`:''}
   ${tbl(['Fase','Tentativas','Pontos'],S.log.map(l=>[l.t,l.tries,l.gain]))}
   <p><b>Resumo:</b> ${S.M.sum}</p>
   <button class="big" onclick="play(${MODS.indexOf(S.M)})">Jogar de novo 🔁</button> <button class="big" onclick="menu()">☰ Menu</button></div>`;

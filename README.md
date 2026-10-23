@@ -4,7 +4,7 @@ Aplicação interativa para aprender conceitos de MySQL por meio de perguntas e 
 
 ## Como executar
 
-Abra o arquivo `index.html` em um navegador. Escolha um módulo no menu e responda às questões. O progresso é apresentado por pontuação e vidas; recordes são guardados no armazenamento local do navegador.
+Abra o arquivo `index.html` em um navegador. Escolha um módulo no menu e responda às questões. O progresso é apresentado por pontuação e vidas; o recorde de cada módulo é atualizado a cada resposta correta e guardado no `localStorage` do navegador, inclusive se a partida for interrompida.
 
 ## Módulos
 
