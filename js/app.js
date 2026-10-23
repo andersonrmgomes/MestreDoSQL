@@ -1,5 +1,5 @@
 ﻿/* ===== 1. Dados de exemplo (3 tabelas) ===== */
-const NOME={c:'clientes',p:'pedidos',pr:'produtos',v:'vendas'};
+const NOME={c:'clientes',p:'pedidos',pr:'produtos',v:'vendas',a:'alunos'};
 const T={
  c:[{id:1,nome:'Ana'},{id:2,nome:'Bruno'},{id:3,nome:'Carla'},{id:4,nome:'Diego'}],
  p:[{id:101,cliente_id:1,produto_id:2,valor:80},{id:102,cliente_id:1,produto_id:1,valor:25},
@@ -9,7 +9,10 @@ const T={
  v:[{id:1,vendedor:'Ana',regiao:'Sul',valor:100,desconto:10},{id:2,vendedor:'Ana',regiao:'Norte',valor:200,desconto:null},
     {id:3,vendedor:'Bruno',regiao:'Norte',valor:150,desconto:15},{id:4,vendedor:'Bruno',regiao:'Norte',valor:50,desconto:null},
     {id:5,vendedor:'Carla',regiao:'Sul',valor:300,desconto:30},{id:6,vendedor:'Carla',regiao:'Sul',valor:100,desconto:null},
-    {id:7,vendedor:'Diego',regiao:'Norte',valor:250,desconto:25},{id:8,vendedor:'Ana',regiao:'Sul',valor:50,desconto:5}]
+    {id:7,vendedor:'Diego',regiao:'Norte',valor:250,desconto:25},{id:8,vendedor:'Ana',regiao:'Sul',valor:50,desconto:5}],
+ // tabela dos módulos INSERT/UPDATE/DELETE e Subconsultas/CASE/funções (Caio está sem nota)
+ a:[{id:1,nome:'Lia',turma:'7A',nota:8.5},{id:2,nome:'Davi',turma:'7A',nota:6},{id:3,nome:'Marta',turma:'7B',nota:9},
+    {id:4,nome:'Caio',turma:'7B',nota:null},{id:5,nome:'Bia',turma:'7A',nota:7},{id:6,nome:'Enzo',turma:'7B',nota:5.5}]
 };
 
 /* ===== 2. Mini-interpretador de JOINs =====
@@ -29,6 +32,13 @@ function join(L,keys,{k,t,on}){
 }
 function run(q){
   if(q.err)return{err:q.err};
+  if(q.fn)return q.fn();   // consultas com resposta calculada à mão (subconsultas, CASE, funções)
+  if(q.dml){ // INSERT/UPDATE/DELETE: devolve a tabela depois da execução e marca linhas alteradas
+    const bef=T[q.t].map(r=>({...r})),aft=q.dml(bef.map(r=>({...r}))),old=id=>bef.find(b=>b.id===id);
+    const hl=aft.map(r=>JSON.stringify(r)!==JSON.stringify(old(r.id)));
+    const n=hl.filter(Boolean).length+bef.filter(b=>!aft.some(r=>r.id===b.id)).length;
+    return{rows:aft.map(r=>Object.values(r)),cols:Object.keys(bef[0]),hl,note:`${n} linha(s) afetada(s)`,dml:1};
+  }
   if(q.parts){ // UNION / UNION ALL
     let rows=q.parts.flatMap(p=>run(p).rows);
     if(q.dedupe)rows=[...new Map(rows.map(r=>[JSON.stringify(r),r])).values()];
@@ -246,25 +256,110 @@ const PS=[
  o('SELECT vendedor, valor, desconto'+F+"\nWHERE regiao = 'Norte' OR desconto IS NOT NULL\nORDER BY valor DESC\nLIMIT 2;",SEL(['vendedor','valor','desconto'],r=>r['v.regiao']==='Norte'||r['v.desconto']!==null,['valor','desc'],2),0,'OR amplia o filtro: entrou a venda da Carla (Sul), que tem desconto.'),
  o('SELECT vendedor, valor, desconto'+F+"\nWHERE regiao = 'Norte' AND desconto IS NULL\nORDER BY valor DESC\nLIMIT 2;",SEL(['vendedor','valor','desconto'],r=>r['v.regiao']==='Norte'&&r['v.desconto']===null,['valor','desc'],2),0,'IS NULL traz justamente as vendas SEM desconto.')]}
 ];
+/* ===== 3d. Módulos novos (tabela alunos) =====
+   D = comando que altera dados (mostra a tabela depois) · X = consulta com resultado calculado */
+const D=fn=>({dml:fn,t:'a'}), X=(cols,fn)=>({fn:()=>({cols,rows:fn(T.a)})});
+const upd=(w,f)=>rows=>rows.map(r=>w(r)?f(r):r), del=w=>rows=>rows.filter(r=>!w(r));
+const ins=o=>rows=>[...rows,{id:Math.max(...rows.map(r=>r.id))+1,...o}];
+const pl=d=>r=>({...r,nota:r.nota===null?null:+(r.nota+d).toFixed(2)}), st=v=>r=>({...r,nota:v});
+const T7=t=>r=>r.turma===t, nn=r=>r.nota!==null;
+const FA='\nFROM alunos', UA='UPDATE alunos\n', DA='DELETE FROM alunos\n';
+const ER=(c,m)=>({err:`ERROR ${c}: ${m}`});
+const PD=[
+{t:'INSERT',obj:"Cadastre a aluna Zoe, turma 7A, nota 9.5 (o id é gerado automaticamente, AUTO_INCREMENT).",exp:'INSERT INTO tabela (colunas) VALUES (valores): os valores seguem a ordem das colunas listadas. Colunas omitidas (como o id) recebem o valor padrão.',
+ opts:[o("INSERT INTO alunos (nome, turma, nota)\nVALUES ('Zoe', '7A', 9.5);",D(ins({nome:'Zoe',turma:'7A',nota:9.5})),1,'Correto: Zoe entra com o próximo id (7).'),
+ o("INSERT INTO alunos\nVALUES ('Zoe', '7A', 9.5);",ER("1136 (21S01)","Column count doesn't match value count at row 1 — a tabela tem 4 colunas e foram dados 3 valores."),0,'Sem lista de colunas, o MySQL espera um valor para TODAS as colunas (inclusive o id).'),
+ o("INSERT INTO alunos (id, nome, turma, nota)\nVALUES (1, 'Zoe', '7A', 9.5);",ER("1062 (23000)","Duplicate entry '1' for key 'alunos.PRIMARY' — o id 1 já pertence à Lia."),0,'O id é chave primária: não pode repetir.'),
+ o("INSERT INTO alunos (nome, turma, nota)\nVALUES ('7A', 'Zoe', 9.5);",D(ins({nome:'7A',turma:'Zoe',nota:9.5})),0,'Sem erro, mas pior: valores na ordem trocada gravaram nome "7A" e turma "Zoe". Confira a ordem!')]},
+{t:'UPDATE com WHERE',obj:'Corrija a nota do Davi para 7.0.',exp:'UPDATE tabela SET coluna = valor WHERE condição. Sem WHERE, TODAS as linhas são alteradas.',
+ opts:[o("UPDATE alunos\nSET nota = 7.0\nWHERE nome = 'Davi';",D(upd(r=>r.nome==='Davi',st(7))),1,'Correto: só 1 linha afetada.'),
+ o('UPDATE alunos\nSET nota = 7.0;',D(upd(()=>true,st(7))),0,'Sem WHERE, todos os alunos ficaram com nota 7.0!'),
+ o("UPDATE alunos\nSET nota = 7.0\nWHERE turma = '7A';",D(upd(T7('7A'),st(7))),0,'Atingiu a turma inteira (Lia, Davi e Bia).'),
+ o("UPDATE alunos\nnota = 7.0\nWHERE nome = 'Davi';",ER("1064 (42000)","You have an error in your SQL syntax near 'nota = 7.0' — faltou a palavra SET."),0,'Falta o SET antes da atribuição.')]},
+{t:'UPDATE com expressão',obj:'Dê 1 ponto extra (+1) a todos os alunos da turma 7B.',exp:'No SET dá para usar a própria coluna: nota = nota + 1. Atenção: NULL + 1 continua NULL, então Caio segue sem nota.',
+ opts:[o("UPDATE alunos\nSET nota = nota + 1\nWHERE turma = '7B';",D(upd(T7('7B'),pl(1))),1,'Correto: Marta e Enzo sobem 1 ponto; Caio continua NULL.'),
+ o("UPDATE alunos\nSET nota = 1\nWHERE turma = '7B';",D(upd(T7('7B'),st(1))),0,'Isso SUBSTITUI a nota por 1, em vez de somar 1.'),
+ o('UPDATE alunos\nSET nota = nota + 1;',D(upd(()=>true,pl(1))),0,'Sem WHERE, a turma 7A também ganhou o ponto.'),
+ o("UPDATE alunos\nSET nota = nota + 1\nWHERE turma = '7A';",D(upd(T7('7A'),pl(1))),0,'Turma errada: o ponto foi para a 7A.')]},
+{t:'UPDATE e NULL',obj:'Coloque nota 0 para quem está sem nota (NULL).',exp:'Novamente: use IS NULL. A condição nota = NULL nunca é verdadeira, então nenhuma linha seria alterada.',
+ opts:[o('UPDATE alunos\nSET nota = 0\nWHERE nota IS NULL;',D(upd(r=>!nn(r),st(0))),1,'Correto: só o Caio foi atualizado.'),
+ o('UPDATE alunos\nSET nota = 0\nWHERE nota = NULL;',D(upd(()=>false,st(0))),0,'"= NULL" nunca é verdadeiro: 0 linhas afetadas.'),
+ o('UPDATE alunos\nSET nota = 0\nWHERE nota IS NOT NULL;',D(upd(nn,st(0))),0,'Zerou justamente quem TEM nota! Condição invertida.'),
+ o('UPDATE alunos\nSET nota = 0\nWHERE nota = 0;',D(upd(r=>r.nota===0,st(0))),0,'Ninguém tem nota 0 ainda; nada muda.')]},
+{t:'DELETE',obj:'Remova o aluno Enzo.',exp:'DELETE FROM tabela WHERE condição. Sem WHERE, a tabela inteira é esvaziada. Sempre teste o filtro com um SELECT antes.',
+ opts:[o("DELETE FROM alunos\nWHERE nome = 'Enzo';",D(del(r=>r.nome==='Enzo')),1,'Correto: só o Enzo saiu.'),
+ o('DELETE FROM alunos;',D(del(()=>true)),0,'Sem WHERE apaga todas as linhas.'),
+ o("DELETE FROM alunos\nWHERE turma = '7B';",D(del(T7('7B'))),0,'Removeu a turma 7B inteira (Marta, Caio e Enzo).'),
+ o("DELETE alunos\nWHERE nome = 'Enzo';",ER("1064 (42000)","You have an error in your SQL syntax near 'WHERE' — o correto é DELETE FROM alunos WHERE ..."),0,'Faltou o FROM.')]},
+{t:'Desafio: UPDATE com AND',obj:'Some 0.5 à nota dos alunos da turma 7A que têm nota menor que 7.5.',exp:'AND exige todas as condições; OR basta uma. Em UPDATE e DELETE um OR distraído pode atingir muito mais linhas do que o esperado.',
+ opts:[o("UPDATE alunos\nSET nota = nota + 0.5\nWHERE turma = '7A' AND nota < 7.5;",D(upd(r=>r.turma==='7A'&&nn(r)&&r.nota<7.5,pl(.5))),1,'Correto: Davi (6.5) e Bia (7.5).'),
+ o("UPDATE alunos\nSET nota = nota + 0.5\nWHERE turma = '7A' OR nota < 7.5;",D(upd(r=>r.turma==='7A'||(nn(r)&&r.nota<7.5),pl(.5))),0,'Com OR, a Lia (7A, nota alta) e o Enzo (7B, nota baixa) também foram alterados.'),
+ o('UPDATE alunos\nSET nota = nota + 0.5\nWHERE nota < 7.5;',D(upd(r=>nn(r)&&r.nota<7.5,pl(.5))),0,'Sem filtrar a turma, o Enzo (7B) também ganhou.'),
+ o("UPDATE alunos\nSET nota = 0.5\nWHERE turma = '7A' AND nota < 7.5;",D(upd(r=>r.turma==='7A'&&nn(r)&&r.nota<7.5,st(.5))),0,'Substituiu a nota por 0.5 em vez de somar.')]}
+];
+const mean=t=>{const v=t.filter(nn).map(r=>r.nota);return v.reduce((a,b)=>a+b,0)/v.length};
+const Xs=(cols,pick)=>X(cols,t=>t.filter(r=>pick(r,t)).map(r=>cols.map(c=>r[c])));
+const cs=f=>X(['nome','situacao'],t=>t.map(r=>[r.nome,f(r.nota)]));
+const nu=(h)=>X(['nome','nota'],t=>t.map(r=>[r.nome,h(r)]));
+const fx=(a,b,fa,fb)=>X([a,b],t=>t.map(r=>[fa(r),fb(r)]));
+const avgNN=v=>{const w=v.filter(n=>n!==null);return w.reduce((a,b)=>a+b,0)/w.length}, avg0=v=>avgNN(v.map(n=>n??0));
+const grp=(af,keep)=>X(['turma','media'],t=>['7A','7B'].map(tu=>[tu,af(t.filter(r=>r.turma===tu).map(r=>r.nota))]).filter(x=>keep(x[1])).map(x=>[x[0],+x[1].toFixed(1)]));
+const PF=[
+{t:'Subconsulta no WHERE',obj:'Mostre nome e nota dos alunos com nota acima da média geral.',exp:'Uma subconsulta entre parênteses calcula um valor (aqui a média, 7.2) que o SELECT de fora usa. Funções de agregação não podem ficar direto no WHERE.',
+ opts:[o('SELECT nome, nota'+FA+'\nWHERE nota > (SELECT AVG(nota) FROM alunos);',Xs(['nome','nota'],(r,t)=>nn(r)&&r.nota>mean(t)),1,'Correto: Lia (8.5) e Marta (9.0) superam 7.2.'),
+ o('SELECT nome, nota'+FA+'\nWHERE nota > AVG(nota);',E1111,0,'AVG direto no WHERE não é permitido: use subconsulta (ou HAVING com GROUP BY).'),
+ o('SELECT nome, nota'+FA+'\nWHERE nota < (SELECT AVG(nota) FROM alunos);',Xs(['nome','nota'],(r,t)=>nn(r)&&r.nota<mean(t)),0,'Sinal invertido: trouxe quem está ABAIXO da média.'),
+ o('SELECT nome, nota'+FA+'\nWHERE nota > (SELECT nota FROM alunos);',ER('1242 (21000)','Subquery returns more than 1 row — a subconsulta devolve uma nota por aluno, mas o > espera um único valor.'),0,'Subconsulta com comparação simples precisa devolver UMA linha.')]},
+{t:'Subconsulta com IN',obj:'Mostre nome e turma de todos os alunos das turmas em que alguém tirou nota 9 ou mais.',exp:'IN (subconsulta) compara com uma lista de valores. Aqui a lista é a(s) turma(s) de quem tirou ≥ 9: só a 7B.',
+ opts:[o('SELECT nome, turma'+FA+'\nWHERE turma IN (SELECT turma FROM alunos WHERE nota >= 9);',Xs(['nome','turma'],(r,t)=>t.some(x=>nn(x)&&x.nota>=9&&x.turma===r.turma)),1,'Correto: toda a turma 7B (Marta, Caio e Enzo).'),
+ o('SELECT nome, turma'+FA+'\nWHERE turma NOT IN (SELECT turma FROM alunos WHERE nota >= 9);',Xs(['nome','turma'],(r,t)=>!t.some(x=>nn(x)&&x.nota>=9&&x.turma===r.turma)),0,'NOT IN inverte: traz as turmas SEM nota 9+ (a 7A).'),
+ o('SELECT nome, turma'+FA+'\nWHERE nota >= 9;',Xs(['nome','turma'],r=>nn(r)&&r.nota>=9),0,'Filtra só quem tirou 9+ (Marta), não a turma toda.'),
+ o('SELECT nome, turma'+FA+'\nWHERE turma IN (SELECT turma FROM alunos WHERE nota <= 6);',Xs(['nome','turma'],(r,t)=>t.some(x=>nn(x)&&x.nota<=6&&x.turma===r.turma)),0,'Subconsulta errada (nota <= 6): pega as duas turmas e devolve todos os alunos.')]},
+{t:'CASE WHEN',obj:"Mostre nome e situação: 'Aprovado' (nota ≥ 7), 'Recuperação' (nota < 7) ou 'Sem nota' (NULL).",exp:'CASE WHEN avalia as condições em ordem e usa a primeira verdadeira; ELSE cobre o resto. NULL precisa de um WHEN ... IS NULL próprio, senão cai no ELSE (ou vira NULL sem ELSE).',
+ opts:[o("SELECT nome,\n CASE WHEN nota IS NULL THEN 'Sem nota'\n      WHEN nota >= 7 THEN 'Aprovado'\n      ELSE 'Recuperação' END AS situacao"+FA+';',cs(n=>n===null?'Sem nota':n>=7?'Aprovado':'Recuperação'),1,'Correto: o IS NULL vem tratado antes das comparações.'),
+ o("SELECT nome,\n IF(nota >= 7, 'Aprovado', 'Recuperação') AS situacao"+FA+';',cs(n=>n!==null&&n>=7?'Aprovado':'Recuperação'),0,'Caio (NULL) cai em "Recuperação": NULL >= 7 não é verdadeiro.'),
+ o("SELECT nome,\n CASE WHEN nota >= 7 THEN 'Aprovado'\n      WHEN nota < 7 THEN 'Recuperação' END AS situacao"+FA+';',cs(n=>n===null?null:n>=7?'Aprovado':'Recuperação'),0,'Sem ELSE e sem tratar NULL, o Caio fica com situação NULL.'),
+ o("SELECT nome,\n CASE WHEN nota IS NULL THEN 'Sem nota'\n      WHEN nota > 7 THEN 'Aprovado'\n      ELSE 'Recuperação' END AS situacao"+FA+';',cs(n=>n===null?'Sem nota':n>7?'Aprovado':'Recuperação'),0,'Com > (e não >=), a Bia (nota 7.0) foi para Recuperação.')]},
+{t:'IFNULL',obj:'Mostre nome e nota, exibindo 0 no lugar de NULL.',exp:'IFNULL(a, b) devolve a, ou b quando a é NULL (COALESCE faz o mesmo com vários argumentos). Ele só troca na exibição; a tabela não muda.',
+ opts:[o('SELECT nome, IFNULL(nota, 0) AS nota'+FA+';',nu(r=>r.nota??0),1,'Correto: Caio aparece com 0.'),
+ o('SELECT nome, ISNULL(nota) AS nota'+FA+';',nu(r=>nn(r)?0:1),0,'No MySQL, ISNULL só devolve 1 ou 0 (é NULL? sim/não); não troca o valor.'),
+ o('SELECT nome, IF(nota = NULL, 0, nota) AS nota'+FA+';',nu(r=>r.nota),0,'"nota = NULL" nunca é verdadeiro, então o NULL continua aparecendo.'),
+ o('SELECT nome, COALESCE(0, nota) AS nota'+FA+';',nu(()=>0),0,'COALESCE devolve o primeiro valor não nulo: como o 0 vem primeiro, todo mundo vira 0.')]},
+{t:'Funções de texto e número',obj:'Mostre o nome em MAIÚSCULAS e a nota arredondada para número inteiro.',exp:'UPPER/LOWER mudam a caixa; ROUND arredonda (8.5 → 9, 5.5 → 6), FLOOR sempre arredonda para baixo. Todas devolvem NULL se o argumento for NULL.',
+ opts:[o('SELECT UPPER(nome), ROUND(nota)'+FA+';',fx('UPPER(nome)','ROUND(nota)',r=>r.nome.toUpperCase(),r=>nn(r)?Math.round(r.nota):null),1,'Correto.'),
+ o('SELECT LOWER(nome), ROUND(nota)'+FA+';',fx('LOWER(nome)','ROUND(nota)',r=>r.nome.toLowerCase(),r=>nn(r)?Math.round(r.nota):null),0,'LOWER deixa em minúsculas, o oposto do pedido.'),
+ o('SELECT UPPER(nome), FLOOR(nota)'+FA+';',fx('UPPER(nome)','FLOOR(nota)',r=>r.nome.toUpperCase(),r=>nn(r)?Math.floor(r.nota):null),0,'FLOOR sempre corta para baixo (8.5 → 8, 5.5 → 5), não arredonda.'),
+ o('SELECT UPPER(nome), ROUND(nota, 1)'+FA+';',fx('UPPER(nome)','ROUND(nota, 1)',r=>r.nome.toUpperCase(),r=>r.nota),0,'ROUND(nota, 1) mantém uma casa decimal; o pedido era inteiro.')]},
+{t:'Desafio: GROUP BY + HAVING + funções',obj:'Mostre a turma e a média das notas (1 casa decimal) apenas das turmas com média acima de 7.2.',exp:'AVG ignora NULL (a média da 7B é (9 + 5.5) ÷ 2 = 7.25). Filtrar grupos pede HAVING; o WHERE não aceita agregações.',
+ opts:[o('SELECT turma, ROUND(AVG(nota), 1) AS media'+FA+'\nGROUP BY turma\nHAVING AVG(nota) > 7.2;',grp(avgNN,a=>a>7.2),1,'Correto: a 7A (7.17) não passa; a 7B (7.25) sim.'),
+ o('SELECT turma, ROUND(AVG(nota), 1) AS media'+FA+'\nGROUP BY turma;',grp(avgNN,()=>true),0,'Faltou o HAVING: as duas turmas aparecem.'),
+ o('SELECT turma, ROUND(AVG(nota), 1) AS media'+FA+'\nWHERE AVG(nota) > 7.2\nGROUP BY turma;',E1111,0,'Agregação no WHERE gera erro: o filtro de grupos é o HAVING.'),
+ o('SELECT turma, ROUND(AVG(IFNULL(nota, 0)), 1) AS media'+FA+'\nGROUP BY turma\nHAVING AVG(IFNULL(nota, 0)) > 7.2;',grp(avg0,a=>a>7.2),0,'Tratar NULL como 0 derruba a média da 7B para 4.83: nenhuma turma passa.')]}
+];
 const MODS=[
 {id:'select',nome:'SELECT básico',ico:'🔎',desc:'SELECT, WHERE, ORDER BY, LIMIT, DISTINCT e LIKE',tabs:['v'],phases:PS,
  sum:'SELECT escolhe colunas · WHERE filtra linhas (texto entre aspas, NULL com IS NULL) · ORDER BY + LIMIT para rankings · DISTINCT remove repetidos · LIKE com % e _ · AND restringe, OR amplia.'},
+{id:'dml',nome:'INSERT, UPDATE e DELETE',ico:'✏️',desc:'Inserir, alterar e apagar dados com segurança',tabs:['a'],phases:PD,
+ sum:'INSERT: valores na ordem das colunas · UPDATE e DELETE SEMPRE com WHERE (senão atingem tudo) · NULL se testa com IS NULL · AND restringe, OR amplia · NULL + 1 continua NULL.'},
 {id:'joins',nome:'JOINs',ico:'🧩',desc:'INNER, LEFT, RIGHT, FULL (via UNION) e CROSS JOIN',tabs:['c','p','pr'],phases:P,
  sum:'INNER = só a interseção · LEFT/RIGHT = preservam um lado (o resto vira NULL) · FULL = LEFT UNION RIGHT · CROSS = todas as combinações · filtro da tabela preservada vai no ON, não no WHERE.'},
 {id:'agg',nome:'Funções de agregação',ico:'🧮',desc:'COUNT, SUM, AVG, MIN, MAX e o efeito do NULL',tabs:['v'],phases:PA,
  sum:'COUNT(*) conta linhas · COUNT(coluna), SUM, AVG, MIN e MAX ignoram NULL · WHERE filtra as linhas antes de agregar.'},
 {id:'group',nome:'GROUP BY e HAVING',ico:'📊',desc:'Agrupar, filtrar grupos e combinar com JOIN',tabs:['v'],phases:PG,bars:1,
- sum:'GROUP BY forma grupos · toda coluna do SELECT está no GROUP BY ou dentro de uma agregação · WHERE filtra linhas antes, HAVING filtra grupos depois · com LEFT JOIN, use COUNT(coluna_da_direita).'}
+ sum:'GROUP BY forma grupos · toda coluna do SELECT está no GROUP BY ou dentro de uma agregação · WHERE filtra linhas antes, HAVING filtra grupos depois · com LEFT JOIN, use COUNT(coluna_da_direita).'},
+{id:'sub',nome:'Subconsultas, CASE e funções',ico:'🧠',desc:'Subconsultas, CASE WHEN, IFNULL, UPPER, ROUND e mais',tabs:['a'],phases:PF,
+ sum:'Subconsulta = SELECT dentro de parênteses · IN compara com uma lista · CASE WHEN escolhe a primeira condição verdadeira (trate NULL à parte) · IFNULL troca NULL · ROUND/FLOOR/UPPER transformam valores · filtro de grupo é HAVING.'}
 ];
 
 /* ===== 4. Utilitários de visualização ===== */
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const hl=s=>esc(s).replace(/\b(SELECT|FROM|ORDER BY|LIMIT|LIKE|BETWEEN|DESC|ASC|OR|NOT|GROUP BY|HAVING|DISTINCT|COUNT|SUM|AVG|MIN|MAX|FULL OUTER JOIN|INNER JOIN|LEFT JOIN|RIGHT JOIN|CROSS JOIN|UNION ALL|UNION|WHERE|AND|ON|IS NOT NULL|IS NULL|NULL|AS)\b/g,'<b>$1</b>');
+const hl=s=>esc(s).replace(/\b(SELECT|INSERT INTO|VALUES|UPDATE|SET|DELETE FROM|CASE|WHEN|THEN|ELSE|END|IN|UPPER|LOWER|ROUND|FLOOR|IFNULL|ISNULL|COALESCE|FROM|ORDER BY|LIMIT|LIKE|BETWEEN|DESC|ASC|OR|NOT|GROUP BY|HAVING|DISTINCT|COUNT|SUM|AVG|MIN|MAX|FULL OUTER JOIN|INNER JOIN|LEFT JOIN|RIGHT JOIN|CROSS JOIN|UNION ALL|UNION|WHERE|AND|ON|IS NOT NULL|IS NULL|NULL|AS)\b/g,'<b>$1</b>');
 const cell=v=>v===null?'<td class="n">NULL</td>':'<td>'+esc(v)+'</td>';
-const tbl=(h,rows)=>`<div class="wrap"><table><tr>${h.map(x=>'<th>'+x+'</th>').join('')}</tr>${rows.map(r=>'<tr>'+r.map(cell).join('')+'</tr>').join('')}</table></div>`;
+const tbl=(h,rows,hl=[])=>`<div class="wrap"><table><tr>${h.map(x=>'<th>'+x+'</th>').join('')}</tr>${rows.map((r,i)=>`<tr${hl[i]?' class="chg"':''}>`+r.map(cell).join('')+'</tr>').join('')}</table></div>`;
 const srcTable=a=>{const r=T[a],k=Object.keys(r[0]);return `<div><h2>${NOME[a]}</h2>${tbl(k,r.map(x=>k.map(c=>x[c])))}</div>`};
 function resultHTML(q){const r=run(q);
   if(r.err)return`<div class="err">${esc(r.err)}</div>`;
+  if(r.dml)return`<p><b>Tabela alunos após executar</b> — ${r.note} (linhas amarelas = alteradas/novas):</p>`+(r.rows.length?tbl(r.cols,r.rows,r.hl):'<p><i>A tabela ficou vazia.</i></p>');
   return`<p><b>Resultado (${r.rows.length} linha${r.rows.length==1?'':'s'}):</b></p>`+(r.rows.length?tbl(r.cols,r.rows):'<p><i>Nenhuma linha retornada.</i></p>');}
 /* Diagrama de Venn em SVG: círculo esquerdo = tabela do FROM, direito = tabela do JOIN */
 function venn(t,lab){

@@ -29,4 +29,4 @@ pre{margin:0;font:.88rem/1.4 Consolas,monospace;white-space:pre-wrap} pre b{colo
 .mod:hover{border-color:var(--blue);transform:translateY(-2px)} .mod .ico{font-size:2.6rem} .mod b{font-size:1.2rem}
 .bar2{display:flex;align-items:center;gap:8px;margin:6px 0} .bar2 span{min-width:90px;font-size:.9rem}
 .bar2 i{display:block;height:18px;background:linear-gradient(90deg,var(--blue),var(--purple));border-radius:9px;min-width:3px}
-.ghost{background:#e4ebff;padding:6px 14px;font-size:.9rem}
+.chg td{background:#fff3c4} .ghost{background:#e4ebff;padding:6px 14px;font-size:.9rem}
